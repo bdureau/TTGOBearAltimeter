@@ -95,6 +95,7 @@ public:
     void getFlightMinAndMax(int flightNbr);
     long getMinAltitude();
     long getMaxAltitude();
+    long getMaxTemperature();
     long getMaxPressure();
     long getMinAccelX();
     long getMaxAccelX();

@@ -248,6 +248,11 @@ long logger_I2C_eeprom::getMaxAltitude()
   return _FlightMinAndMax.maxAltitude;
 }
 
+long logger_I2C_eeprom::getMaxTemperature()
+{
+  return _FlightMinAndMax.maxTemperature;
+}
+
 long logger_I2C_eeprom::getMaxPressure()
 {
   return _FlightMinAndMax.maxPressure;
