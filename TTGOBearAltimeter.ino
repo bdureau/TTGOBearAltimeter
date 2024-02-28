@@ -42,6 +42,8 @@ TFT_eSPI tft = TFT_eSPI();
 GraphWidget gr = GraphWidget(&tft);    // Graph widget
 // Flight curves are drawn on tft using graph instance
 TraceWidget trAltitude = TraceWidget(&gr);    // Altitude
+TraceWidget trTemperature = TraceWidget(&gr);
+TraceWidget trPressure = TraceWidget(&gr);
 TraceWidget trAccelX = TraceWidget(&gr);    // Accel X
 TraceWidget trAccelY = TraceWidget(&gr);    // Accel Y
 TraceWidget trAccelZ = TraceWidget(&gr);    // Accel Z
@@ -92,6 +94,8 @@ long liftoffAltitude = 20;
 long lastAltitude;
 //current altitude
 long currAltitude;
+long diplayedFlightNbr =0;
+long currentCurveType = 0;
 
 
 /*
@@ -125,8 +129,8 @@ void button_init()
   btnUp.setLongClickHandler([](Button2 & b) {
     // Select
     unsigned int time = b.wasPressedFor();
-    if (time >= 1000) {
-      Serial.println("Button Up slow");
+    if (time >= 3000) {
+      Serial.println("Turning off");
       inGraph = false;
       enter_sleep();
     }
@@ -134,20 +138,36 @@ void button_init()
 
   btnUp.setClickHandler([](Button2 & b) {
     // Up
-    Serial.println("Button Up fast");// It's called downCmd because it decreases the index of an array. Visually that would mean the selector goes upwards.
+    Serial.println("Changing curve type");// It's called downCmd because it decreases the index of an array. Visually that would mean the selector goes upwards.
+    if(inGraph){
+      long lastFlightNbr = logger.getLastFlightNbr();
+      //Make sure we have no reach the last flight
+      if(lastFlightNbr >= diplayedFlightNbr) {
+       if(currentCurveType < 3) {
+        currentCurveType++;
+        drawFlightNbr(diplayedFlightNbr, currentCurveType);
+       } else {
+          currentCurveType =0;
+          drawFlightNbr(diplayedFlightNbr, currentCurveType);
+       }  
+      } 
+    }
   });
 
   btnDwn.setLongClickHandler([](Button2 & b) {
     // Exit
+    Serial.println("Button Down slow");
     unsigned int time = b.wasPressedFor();
     if (time >= 1000 & time < 10000) {
       if (!inGraph) {
-        Serial.println("Button Down slow");
-        //drawAxes();
-        //drawAxesXY(0.0, 100.0, 0, 50.0 );
-        inGraph = true;
-        //drawFlight();
-        drawFlightNbr(0);
+        long lastFlightNbr = logger.getLastFlightNbr();
+        Serial.print("lastFlightNbr:");
+        Serial.println(lastFlightNbr);
+        if (!(lastFlightNbr < 0)) {
+          inGraph = true;
+          diplayedFlightNbr =0;
+          drawFlightNbr(diplayedFlightNbr, currentCurveType);  
+        } 
       } else {
         inGraph = false;
         tft.init();
@@ -185,6 +205,23 @@ void button_init()
   btnDwn.setClickHandler([](Button2 & b) {
     // Down
     Serial.println("Button Down fast"); // It's called upCmd because it increases the index of an array. Visually that would mean the selector goes downwards.
+    if(inGraph){
+      long lastFlightNbr = logger.getLastFlightNbr();
+      //Make sure we have no reach the last flight
+      if(lastFlightNbr > diplayedFlightNbr) {
+        
+        diplayedFlightNbr ++;
+        Serial.print("Flight:");
+        Serial.println(diplayedFlightNbr);
+        drawFlightNbr(diplayedFlightNbr, currentCurveType);
+      } else {
+        // if not lets go back to the first one if it exists
+        if(!(lastFlightNbr < 0)){
+          diplayedFlightNbr =0;
+          drawFlightNbr(diplayedFlightNbr, currentCurveType);
+        }
+      }
+    }
   });
 }
 
@@ -249,10 +286,6 @@ void setup() {
     accel345.setRange(ADXL345_RANGE_16_G);
   }
 
-  // enable the button on pin 35
-  //pinMode(BUTTON_GPIO, INPUT_PULLUP);
-
-
   int v_ret;
   v_ret = logger.readFlightList();
   long lastFlightNbr = logger.getLastFlightNbr();
@@ -271,7 +304,7 @@ void setup() {
   }
   canRecord = logger.CanRecord();
   button_init();
-  //delay(1000);
+  
 
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
@@ -323,12 +356,12 @@ void loop() {
         tft_output(ICON_POS_X, 0, 70, 36, (uint16_t*) battery_01);
       }
       drawingText(String(batteryLevel) + "%");
-      //delay(1000);
     }
     char Altitude [15];
     currAltitude = (long)ReadAltitude() - initialAltitude;
     sprintf(Altitude, "Altitude = %i meters    ", currAltitude );
     tft.setCursor (0, STATUS_HEIGHT_BAR);
+    tft.println("                                     ");
     tft.println(Altitude);
 
 
@@ -379,8 +412,12 @@ void enter_sleep()
   esp_deep_sleep_start();
 }
 
+/*
+ * drawAxesXY(float minX, float maxX, float minY, float maxY )
+ * 
+ */
 
-void drawAxesXY(float minX, float maxX, float minY, float maxY ) {
+void drawAxesXY(float minX, float maxX, float minY, float maxY, int flightNbr, char *curveName ) {
   tft.fillScreen(TFT_BLACK);
   
   // x scale units is from 0 to 100, y scale units is 0 to 50
@@ -391,13 +428,27 @@ void drawAxesXY(float minX, float maxX, float minY, float maxY ) {
   gr.setGraphGrid(0.0, maxX / 5, 0.0, maxY / 5, TFT_BLUE);
 
   // Draw empty graph, top left corner at 20,10 on TFT
-  gr.drawGraph(20, 10);
+  gr.drawGraph(30, 10);
 
   // Draw the x axis scale
   tft.setTextDatum(TC_DATUM); // Top centre text datum
   tft.drawNumber(minX, gr.getPointX(minX), gr.getPointY(0) + 3);
-  tft.drawNumber(maxX / 2, gr.getPointX(maxX / 2), gr.getPointY(0) + 3);
-  tft.drawNumber(maxX, gr.getPointX(maxX), gr.getPointY(0) + 3);
+  if(maxX < 1000) {
+    tft.drawNumber(maxX / 2, gr.getPointX(maxX / 2), gr.getPointY(0) + 3);
+    tft.drawNumber(maxX, gr.getPointX(maxX), gr.getPointY(0) + 3);
+    tft.drawString("time(ms)", gr.getPointX(maxX/4),  gr.getPointY(0)+3);   
+  } else {
+    char temp[10];
+    sprintf(temp, "%3.1f",  maxX/1000/2);
+    tft.drawString(temp, gr.getPointX(maxX/2),  gr.getPointY(0)+3);
+    sprintf(temp, "%3.1f",  maxX/1000);
+    tft.drawString(temp, gr.getPointX(maxX)-10,  gr.getPointY(0)+3);
+    tft.drawString("time (s)", gr.getPointX(maxX/4),  gr.getPointY(0)+3);
+  }
+  char flight[15];
+  sprintf(flight, "Flight %i  ",  flightNbr);
+  tft.drawString(flight, gr.getPointX(maxX)-10,  gr.getPointY(maxY));
+  tft.drawString(curveName, gr.getPointX(maxX/3),gr.getPointY(maxY));
 
   // Draw the y axis scale
   tft.setTextDatum(MR_DATUM); // Middle right text datum
@@ -408,14 +459,44 @@ void drawAxesXY(float minX, float maxX, float minY, float maxY ) {
  * drawFlightNbr(int flightNbr)
  * 
  */
-void drawFlightNbr(int flightNbr){
-  // Start new trace
-  trAltitude.startTrace(TFT_GREEN);
+void drawFlightNbr(int flightNbr, int curveType){
+  
   
   logger.getFlightMinAndMax(flightNbr);
 
-  drawAxesXY(0.0, logger.getFlightDuration(), 0, (float) logger.getMaxAltitude() );
 
+  //altitude
+  if( curveType == 0) {
+    // Start altitude trace
+    trAltitude.startTrace(TFT_GREEN);
+    drawAxesXY(0.0, logger.getFlightDuration(), 0, (float) logger.getMaxAltitude(),flightNbr, "Altitude (meters)" );
+  }
+
+  //pressure
+  if(curveType == 1) {
+    trPressure.startTrace(TFT_GREY); 
+    drawAxesXY(0.0, logger.getFlightDuration(), 0, (float) logger.getMaxPressure(),flightNbr, "Pressure (mBar)" );
+  }
+
+  if(curveType == 2) {
+    trAccelX.startTrace(TFT_RED); 
+    trAccelY.startTrace(TFT_PURPLE);
+    trAccelY.startTrace(TFT_YELLOW);
+    float maxAccel = 0.0f;
+    if(logger.getMaxAccelX() > maxAccel)
+      maxAccel = (float)logger.getMaxAccelX();
+    if(logger.getMaxAccelY() > maxAccel)
+      maxAccel = (float)logger.getMaxAccelY();
+    if(logger.getMaxAccelZ() > maxAccel)
+      maxAccel = (float)logger.getMaxAccelZ();
+        
+    drawAxesXY(0.0, logger.getFlightDuration(), 0, (float) maxAccel/1000.0,flightNbr, "Accel X,Y,Z (m/s)" );
+  }
+  //temperature
+  if(curveType == 3) {
+    trTemperature.startTrace(TFT_BROWN);
+    drawAxesXY(0.0, logger.getFlightDuration(), 0, (float) logger.getMaxTemperature(),flightNbr, "Temp (°C)" );  
+  } 
   unsigned long startaddress;
   unsigned long endaddress;
 
@@ -426,15 +507,31 @@ void drawFlightNbr(int flightNbr){
   {
     unsigned long i = startaddress;
     unsigned long currentTime = 0;
-    long altitude;
-
+    
     while (i < (endaddress + 1))
     {
       i = logger.readFlight(i) + 1;
       
       currentTime = currentTime + logger.getFlightTimeData();
-      altitude = logger.getFlightAltitudeData();
-      trAltitude.addPoint(currentTime, altitude);
+
+      //altitude
+      if( curveType == 0) {
+        long altitude = logger.getFlightAltitudeData();
+        trAltitude.addPoint(currentTime, altitude);
+      }
+      if( curveType == 1) {
+        long pressure = logger.getFlightPressureData();
+        trPressure.addPoint(currentTime, pressure);
+      }
+      if( curveType == 2) {
+        trAccelX.addPoint( currentTime, (float)logger.getADXL345accelX()/1000.0);
+        trAccelY.addPoint( currentTime, (float)logger.getADXL345accelY()/1000.0);
+        trAccelZ.addPoint( currentTime, (float)logger.getADXL345accelZ()/1000.0);
+      }
+      if( curveType == 3) {
+        long temperature = logger.getFlightTemperatureData();
+        trTemperature.addPoint(currentTime, temperature);
+      }    
     }
   }
 }
@@ -487,6 +584,27 @@ void recordAltitude()
       prevAltitude = currAltitude;
       diffTime = currentTime - prevTime;
       prevTime = currentTime;
+      //display 
+      char Altitude [15];
+      currAltitude = (long)ReadAltitude() - initialAltitude;
+      sprintf(Altitude, "Altitude = %i meters    ", currAltitude );
+      tft.setCursor (0, STATUS_HEIGHT_BAR);
+      tft.println("Recording in progress .....");
+      tft.println(Altitude);
+
+
+      char temp [15];
+      sensors_event_t event345;
+      accel345.getEvent(&event345);
+      sprintf(temp, "x=%3.2f m/s", (float)event345.acceleration.x );
+      tft.println("");
+      tft.println(temp);
+      sprintf(temp, "y=%3.2f m/s", (float)event345.acceleration.y );
+      tft.println(temp);
+      sprintf(temp, "z=%3.2f m/s", (float)event345.acceleration.z );
+      tft.println(temp);
+      
+      //record
       if (canRecord)
       {
         logger.setFlightTimeData( diffTime);
@@ -523,6 +641,8 @@ void recordAltitude()
 
         logger.writeFlightList();
         exitRecording = true;
+        if(currentFileNbr < 25)
+          currentFileNbr ++;
       }
     } // end while (liftoff)
   } //end while(recording)
