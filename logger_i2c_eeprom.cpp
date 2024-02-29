@@ -1,5 +1,7 @@
 #include "logger_i2c_eeprom.h"
 #include "IC2extEEPROM.h"
+#include "config.h"
+
 extEEPROM eep(kbits_512, 1, 64);
 logger_I2C_eeprom::logger_I2C_eeprom(uint8_t deviceAddress)
 {
@@ -390,6 +392,8 @@ void logger_I2C_eeprom::printFlightData(int flightNbr)
       strcat(flightData, temp);
       sprintf(temp, "%i,", _FlightData.pressure );
       strcat(flightData, temp);
+      sprintf(temp, "%i,", 0 ); //dummy voltage
+      strcat(flightData, temp);
       sprintf(temp, "%i,", _FlightData.ADXL345accelX );
       strcat(flightData, temp);
       sprintf(temp, "%i,", _FlightData.ADXL345accelY );
@@ -404,6 +408,8 @@ void logger_I2C_eeprom::printFlightData(int flightNbr)
       
       Serial.print("$");
       Serial.print(flightData);
+      SerialCom.print("$");
+      SerialCom.print(flightData);
     }
   }
 }
