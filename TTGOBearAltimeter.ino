@@ -31,7 +31,7 @@
 #include "images/battery_04.h"
 #include "images/battery_05.h"
 
-
+unsigned long initialTime=0;
 
 #define BTN_UP 35 // Pinnumber for button for up/previous and select / enter actions (don't change this if you want to use the onboard buttons)
 #define BTN_DWN 0 // Pinnumber for button for down/next and back / exit actions (don't change this if you want to use the onboard buttons)
@@ -81,6 +81,11 @@ bool inGraph = false;
 
 BMP085 bmp;
 
+//telemetry
+boolean telemetryEnable = false;
+long lastTelemetry = 0;
+boolean liftOff = false;
+
 //EEProm address
 logger_I2C_eeprom logger(0x50) ;
 // End address of the 512 eeprom
@@ -104,7 +109,7 @@ long lastAltitude;
 long currAltitude;
 long diplayedFlightNbr = 0;
 long currentCurveType = 0;
-
+long apogeeAltitude;
 
 /*
    drawingText(String text)
@@ -347,10 +352,13 @@ void loop() {
     button_loop();
 
     currAltitude = (long)ReadAltitude() - initialAltitude;
-
+    if (liftOff)
+        SendTelemetry(millis() - initialTime, 200);
     if (!( currAltitude > liftoffAltitude) )
     {
+      
       if (!inGraph) {
+        SendTelemetry(0, 500);
         tft.setCursor (0, STATUS_HEIGHT_BAR);
 
         if (BL.getBatteryVolts() >= MIN_USB_VOL) {
@@ -601,8 +609,8 @@ void recordAltitude()
   long recordingTimeOut = 120 * 1000;
 
   exitRecording = false;
-  boolean liftOff = false;
-  long initialTime = 0;
+  
+  //long initialTime = 0;
   lastAltitude = 0;
 
   while (!exitRecording)
@@ -613,6 +621,7 @@ void recordAltitude()
     if ((currAltitude > liftoffAltitude) && !liftOff)
     {
       liftOff = true;
+      SendTelemetry(0, 200);
       // save the time
       initialTime = millis();
 
@@ -636,6 +645,7 @@ void recordAltitude()
       currentTime = millis() - initialTime;
 
       prevAltitude = currAltitude;
+      SendTelemetry(currentTime, 200);
       diffTime = currentTime - prevTime;
       prevTime = currentTime;
       //display
@@ -974,7 +984,7 @@ void interpretCommandBuffer(char *commandbuffer) {
   //telemetry on/off
   else if (commandbuffer[0] == 'y')
   {
-    /*if (commandbuffer[1] == '1') {
+    if (commandbuffer[1] == '1') {
       SerialCom.print(F("Telemetry enabled\n"));
       telemetryEnable = true;
       }
@@ -983,7 +993,7 @@ void interpretCommandBuffer(char *commandbuffer) {
       telemetryEnable = false;
       }
       Serial.print(F("$OK;\n"));
-      SerialCom.print(F("$OK;\n"));*/
+      SerialCom.print(F("$OK;\n"));
   }
 
 
@@ -1118,4 +1128,91 @@ void printAltiConfig()
   /*}
     else
     SerialCom.print(altiConfig);*/
+}
+
+
+/*
+   SendTelemetry(long sampleTime, int freq)
+   Send telemety so that we can plot the flight
+
+*/
+void SendTelemetry(long sampleTime, int freq) {
+  char altiTelem[150] = "";
+  char temp[10] = "";
+
+  if (telemetryEnable && (millis() - lastTelemetry) > freq) {
+    lastTelemetry = millis();
+    int val = 0;
+    //check liftoff
+    int li = 0;
+    if (liftOff)
+      li = 1;
+
+        
+    int landed = 0;
+    if ( liftOff && currAltitude < 10)
+      landed = 1;
+
+    strcat(altiTelem, "telemetry," );
+    sprintf(temp, "%i,", currAltitude);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", li);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", -1);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", apogeeAltitude);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", -1);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", -1);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", landed);
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", sampleTime);
+    strcat(altiTelem, temp);
+    strcat(altiTelem, "-1,");
+    strcat(altiTelem, "-1,");
+    strcat(altiTelem, "-1,");
+    strcat(altiTelem, "-1,");
+
+    dtostrf(BL.getBatteryVolts(), 4, 2, temp);
+    strcat(altiTelem, temp);
+    strcat(altiTelem, ",");
+
+    // temperature
+    float temperature;
+    temperature = bmp.readTemperature();
+    sprintf(temp, "%i,", (int)temperature );
+    strcat(altiTelem, temp);
+
+    sprintf(temp, "%i,", (int)(100 * ((float)logger.getLastFlightEndAddress() / endAddress)) );
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", logger.getLastFlightNbr() + 1 );
+    strcat(altiTelem, temp);
+
+    //drogueFiredAltitude
+    sprintf(temp, "%i,", -1);
+    strcat(altiTelem, temp);
+
+    sensors_event_t event345;
+    accel345.getEvent(&event345);
+    sprintf(temp, "%i,", (int)(1000 * ((float)event345.acceleration.x)) );
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", (int)(1000 * ((float)event345.acceleration.y)) );
+    strcat(altiTelem, temp);
+    sprintf(temp, "%i,", (int)(1000 * ((float)event345.acceleration.z)) );
+    strcat(altiTelem, temp);
+    
+    unsigned int chk;
+    chk = msgChk(altiTelem, sizeof(altiTelem));
+    sprintf(temp, "%i", chk);
+    strcat(altiTelem, temp);
+    strcat(altiTelem, ";\n");
+
+    Serial.print("$");
+    Serial.print(altiTelem);
+
+    SerialCom.print("$");
+    SerialCom.print(altiTelem);
+  }
 }
