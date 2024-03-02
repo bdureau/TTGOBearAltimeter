@@ -1,7 +1,10 @@
 # TTGOBearAltimeter (firmware)
 This is a simple altimeter that can be attached to the nose cone of a rocket, it detect lift off and record altitude, pressure, temperature and acceleration on the 3 axes
 
-<img src="/photos/TTGOBearAltimeter.jpg" width="10%">
+<img src="/photos/TTGOAltimeterAccel.jpg" width="35%"><img src="/photos/TTGOAltimeterAltitude.jpg" width="35%">
+<img src="/photos/TTGOAltimeterSplashScreen.jpg" width="20%">
+<img src="/photos/TTGOAltimeterTemperature.jpg" width="35%">
+<img src="/photos/TTGOAltimeterMainScreen.jpg" width="35%">
 
 # Building the code
 You will need to download the Arduino ide from the [Arduino web site](https://www.arduino.cc/). 
