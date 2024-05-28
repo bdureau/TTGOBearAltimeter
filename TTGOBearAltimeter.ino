@@ -1,5 +1,5 @@
 /*
-    TTGO Bear Altimeter ver0.1
+    TTGO Bear Altimeter ver0.4
     Copyright Boris du Reau 2012-2024
     This is using a BMP085 or BMP180 presure sensor
     An ADXL345 for the accelerometer
@@ -9,6 +9,8 @@
     Major changes on version 0.1
     Initial version of the code, this is re-using code for the Altimulti firmware
     can record altitude, acceleration, temperature and pressure
+
+    Major changes on version 0.4
 
 */
 
@@ -67,8 +69,15 @@ BluetoothSerial SerialBT;
 #define CONV_FACTOR 1.8
 #define READS 20
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 2
+#define MINOR_VERSION 4
 #define BOARD_FIRMWARE "TTGOBearAltimeter"
+#ifndef RX1
+#define RX1 33
+#endif
+
+#ifndef TX1
+#define TX1 32
+#endif
 
 Pangodream_18650_CL BL(ADC_PIN, CONV_FACTOR, READS);
 
@@ -255,17 +264,23 @@ void setup() {
   // initialise the connection
   Wire.begin();
   Serial.begin(115200);
+  //Serial1.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, RX1, TX1);
   //char altiName [15];
   //sprintf(altiName, "TTGOAlti%i", (int)config.altiID );
   SerialCom.begin("TTGOAltimeter");
-  bmp.begin();
-
   pinMode(14, OUTPUT);
   digitalWrite(14, HIGH);
 
   tft.init();
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);
+  if (!bmp.begin(0)) {
+    Serial.println("Could not find a valid BMP085 sensor, check wiring!");
+    tft.drawString("Barometric sensor does not work", 6, 135);
+    while (1) {
+      }  
+  }
 
   tft.pushImage(6, 0, 128, 128, bear_altimeters128x128);
   tft.drawString("Bear Altimeter", 6, 135);
@@ -296,6 +311,10 @@ void setup() {
   {
     //There was a problem detecting the ADXL375 ... check your connections
     Serial.println("Ooops, no ADXL345 detected ... Check your wiring!");
+    tft.drawString("ADXL345 sensor does not work", 6, 135);
+    while (1) {
+      
+    }
   } else {
     accel345.setRange(ADXL345_RANGE_16_G);
   }
@@ -332,6 +351,20 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);
   tft.setTextFont(2);
+
+  Serial.print("RX:");
+  Serial.println(RX);
+
+  Serial.print("TX:");
+  Serial.println(TX);
+  
+
+  Serial2.print("RX1:");
+  Serial2.println(RX1);
+
+  Serial2.print("TX1:");
+  Serial2.println(TX1);
+  
 }
 
 /*
@@ -467,6 +500,7 @@ void enter_sleep()
   tft.fillScreen(TFT_BLACK);
   tft.setRotation(0);
   tft.drawString("turning off...", 6, 185);
+  digitalWrite(4, LOW);
   delay(2000);
   pinMode(BUTTON_GPIO, INPUT_PULLUP);
   rtc_gpio_hold_en(BUTTON_GPIO);
@@ -694,7 +728,7 @@ void recordAltitude()
         }
       }
 
-      if ((canRecord  && (currAltitude < 10) ) || (canRecord  && (millis() - initialTime) > recordingTimeOut))
+      if ((canRecord  && (currAltitude < 10) && (millis() - initialTime) > 30000) || (canRecord  && (millis() - initialTime) > recordingTimeOut) )
       {
         //end loging
         //store start and end address
