@@ -419,7 +419,7 @@ void loop() {
           }
           drawingText(String(batteryLevel) + "%");
         }
-        char Altitude [15];
+        char Altitude [35];
         //currAltitude = (long)ReadAltitude() - initialAltitude;
         sprintf(Altitude, "Altitude = %i meters    ", currAltitude );
         tft.setCursor (0, STATUS_HEIGHT_BAR);
