@@ -23,7 +23,7 @@ The project depend on the following libraries
   
 Compile with the following options:
 
-<img src="/photos/LILYGo-T-QT.png" width="35%">
+<img src="/photos/TTGO-T-Display.png" width="35%">
 
 Prior to compiling go to the TFT_eSPI and open up the file User_Setup_Select.h
 
