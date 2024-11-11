@@ -19,3 +19,11 @@ The project depend on the following libraries
   - Button2
   - uiwidgets
   
+Compile with the following options:
+
+Prior to compiling go to the TFT_eSPI and open up the file User_Setup_Select.h
+Comment out the following line
+//#include <User_Setup.h> 
+
+and uncomment the following line
+#include <User_Setups/Setup25_TTGO_T_Display.h> 
