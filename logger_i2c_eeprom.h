@@ -41,8 +41,8 @@ struct FlightMinAndMaxStruct {
   long flightDuration;
 };
 struct FlightConfigStruct {
-  long flight_start;    
-  long flight_stop; 
+  long flight_start;
+  long flight_stop;
 };
 
 #define LOGGER_I2C_EEPROM_VERSION "1.0.0"
@@ -55,10 +55,10 @@ struct FlightConfigStruct {
 #define FLIGHT_DATA_START 200
 class logger_I2C_eeprom
 {
-public:
+  public:
     /**
-     * Initializes the EEPROM with a default pagesize of I2C_EEPROM_PAGESIZE.
-     */
+       Initializes the EEPROM with a default pagesize of I2C_EEPROM_PAGESIZE.
+    */
     logger_I2C_eeprom(uint8_t deviceAddress);
     //logger_I2C_eeprom(uint8_t deviceAddress, const unsigned int deviceSize);
     uint8_t _deviceAddress;
@@ -104,19 +104,19 @@ public:
     long getMinAccelZ();
     long getMaxAccelZ();
     long getFlightDuration();
-    
+
     boolean CanRecord();
     unsigned long writeFastFlight(unsigned long eeaddress);
     long getSizeOfFlightData();
     long getLastFlightEndAddress();
-    
-    
-    
-private:
+
+
+
+  private:
     FlightConfigStruct _FlightConfig[25];
     FlightDataStruct _FlightData;
     FlightMinAndMaxStruct _FlightMinAndMax;
-	unsigned int msgChk( char * buffer, long length );
+    unsigned int msgChk( char * buffer, long length );
     uint8_t _pageSize;
 };
 

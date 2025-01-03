@@ -1,9 +1,12 @@
 /*
-    TTGO Bear Altimeter ver0.4
-    Copyright Boris du Reau 2012-2024
+    TTGO Bear Altimeter ver0.5
+    Copyright Boris du Reau 2012-2025
     This is using a BMP085 or BMP180 presure sensor
     An ADXL345 for the accelerometer
+
+    !!!IMPORTANT!!!!
     to compile it use ESP32 Dev module
+    !!!IMPORTANT!!!!
     This uses an 24LC512 eeprom to record the flight
 
     Major changes on version 0.1
@@ -11,8 +14,15 @@
     can record altitude, acceleration, temperature and pressure
 
     Major changes on version 0.4
+    Fixes
+
+    Major changes on version 0.5
+    Allow name change
+    change apogee detection
+    adding support for BMP280
 
 */
+
 
 #include <TFT_eSPI.h>
 #include <Button2.h>
@@ -20,7 +30,16 @@
 #include <driver/rtc_io.h>
 #include "config.h"
 
+#ifdef BMP085_180
 #include "Bear_BMP085.h"
+#endif
+
+#ifdef BMP280_sensor
+#include <Wire.h>
+#include "Bear_BMP280.h"
+#define P0 1013.25
+#endif
+
 #include "logger_i2c_eeprom.h"
 #include "kalman.h"
 #include <Adafruit_ADXL345_U.h>
@@ -33,7 +52,8 @@
 #include "images/battery_04.h"
 #include "images/battery_05.h"
 
-unsigned long initialTime=0;
+unsigned long initialTime = 0;
+unsigned long timeToApogee = 0;
 
 #define BTN_UP 35 // Pinnumber for button for up/previous and select / enter actions (don't change this if you want to use the onboard buttons)
 #define BTN_DWN 0 // Pinnumber for button for down/next and back / exit actions (don't change this if you want to use the onboard buttons)
@@ -51,9 +71,11 @@ TraceWidget trAccelX = TraceWidget(&gr);    // Accel X
 TraceWidget trAccelY = TraceWidget(&gr);    // Accel Y
 TraceWidget trAccelZ = TraceWidget(&gr);    // Accel Z
 
-//#include "BluetoothSerial.h"
 BluetoothSerial SerialBT;
 //#define SerialCom SerialBT
+
+#include <Preferences.h>
+Preferences preferences;
 
 //////////////////////////////////////////////////////////////////////
 // Global variables
@@ -69,7 +91,7 @@ BluetoothSerial SerialBT;
 #define CONV_FACTOR 1.8
 #define READS 20
 #define MAJOR_VERSION 0
-#define MINOR_VERSION 4
+#define MINOR_VERSION 5
 #define BOARD_FIRMWARE "TTGOBearAltimeter"
 #ifndef RX1
 #define RX1 33
@@ -88,7 +110,14 @@ Adafruit_ADXL345_Unified accel345 = Adafruit_ADXL345_Unified();
 
 bool inGraph = false;
 
+//BMP085 bmp;
+#ifdef BMP085_180
 BMP085 bmp;
+#endif
+
+#ifdef BMP280_sensor
+BMP280 bmp;
+#endif
 
 //telemetry
 boolean telemetryEnable = false;
@@ -119,7 +148,8 @@ long currAltitude;
 long diplayedFlightNbr = 0;
 long currentCurveType = 0;
 long apogeeAltitude;
-
+//nbr of measures to do so that we are sure that apogee has been reached
+unsigned long measures = 5;
 /*
    drawingText(String text)
 
@@ -152,6 +182,7 @@ void button_init()
     if (time >= 3000) {
       Serial.println("Turning off");
       inGraph = false;
+      SerialCom.end();//carefull it might crash
       enter_sleep();
     }
   });
@@ -268,20 +299,32 @@ void setup() {
   Serial2.begin(115200, SERIAL_8N1, RX1, TX1);
   //char altiName [15];
   //sprintf(altiName, "TTGOAlti%i", (int)config.altiID );
-  SerialCom.begin("TTGOAltimeter");
+  //SerialCom.begin("TTGOAltimeter");
+  char bluetoothName [21];
+  preferences.begin("namespace", false);
+  sprintf(bluetoothName, "%s", preferences.getString("Name", "TTGOAltimeter"));
+  preferences.end();
+  SerialCom.begin(bluetoothName);
+
   pinMode(14, OUTPUT);
   digitalWrite(14, HIGH);
 
   tft.init();
   tft.fillScreen(TFT_BLACK);
   tft.setSwapBytes(true);
+#ifdef BMP085_180
   if (!bmp.begin(0)) {
     Serial.println("Could not find a valid BMP085 sensor, check wiring!");
     tft.drawString("Barometric sensor does not work", 6, 135);
     while (1) {
-      }  
+    }
   }
+#endif
 
+#ifdef BMP280_sensor
+  bmp.begin();
+  bmp.setOversampling(0);
+#endif
   tft.pushImage(6, 0, 128, 128, bear_altimeters128x128);
   tft.drawString("Bear Altimeter", 6, 135);
   tft.drawString("ver 1.0", 6, 145);
@@ -313,7 +356,7 @@ void setup() {
     Serial.println("Ooops, no ADXL345 detected ... Check your wiring!");
     tft.drawString("ADXL345 sensor does not work", 6, 135);
     while (1) {
-      
+
     }
   } else {
     accel345.setRange(ADXL345_RANGE_16_G);
@@ -357,14 +400,14 @@ void setup() {
 
   Serial.print("TX:");
   Serial.println(TX);
-  
+
 
   Serial2.print("RX1:");
   Serial2.println(RX1);
 
   Serial2.print("TX1:");
   Serial2.println(TX1);
-  
+
 }
 
 /*
@@ -386,10 +429,10 @@ void loop() {
 
     currAltitude = (long)ReadAltitude() - initialAltitude;
     if (liftOff)
-        SendTelemetry(millis() - initialTime, 200);
+      SendTelemetry(millis() - initialTime, 200);
     if (!( currAltitude > liftoffAltitude) )
     {
-      
+
       if (!inGraph) {
         SendTelemetry(0, 500);
         tft.setCursor (0, STATUS_HEIGHT_BAR);
@@ -439,7 +482,7 @@ void loop() {
         tft.println(temp);
       }
 
-      
+
       while (Serial.available())
       {
         readVal = Serial.read();
@@ -472,8 +515,8 @@ void loop() {
 
     }
     else {
-        Serial.println("Recording!!!!");
-        recordAltitude();
+      Serial.println("Recording!!!!");
+      recordAltitude();
     }
   }
   interpretCommandBuffer(commandbuffer);
@@ -485,11 +528,45 @@ void loop() {
 
 */
 
+/*float ReadAltitude()
+  {
+  return KalmanCalc(bmp.readAltitude());
+  }*/
+
+#ifdef BMP085_180
+/*
+   ReadAltitude()
+   Read Altitude function for a BMP85 or 180 Bosch sensor
+
+*/
 float ReadAltitude()
 {
   return KalmanCalc(bmp.readAltitude());
+  //return bmp.readAltitude();
 }
+#endif
 
+
+
+#ifdef BMP280_sensor
+/*
+
+   Read Altitude function for a BMP280 Bosch sensor
+
+
+*/
+double ReadAltitude()
+{
+  double T, P, A;
+  char result = bmp.startMeasurment();
+  if (result != 0) {
+    delay(result);
+    result = bmp.getTemperatureAndPressure(T, P);
+    A = KalmanCalc(bmp.altitude(P, P0));
+  }
+  return A;
+}
+#endif
 /*
 
    enter_sleep()
@@ -643,7 +720,7 @@ void recordAltitude()
   long recordingTimeOut = 120 * 1000;
 
   exitRecording = false;
-  
+
   //long initialTime = 0;
   lastAltitude = 0;
 
@@ -690,6 +767,20 @@ void recordAltitude()
       tft.println("Recording in progress .....");
       tft.println(Altitude);
 
+      // detect apogee
+      if (currAltitude < lastAltitude) {
+        measures = measures - 1;
+        if (measures == 0)
+        {
+          apogeeAltitude = lastAltitude;
+          timeToApogee = currentTime;
+        }
+      }
+      else
+      {
+        lastAltitude = currAltitude;
+        measures = 5; //config.nbrOfMeasuresForApogee;
+      }
 
       char temp [15];
       sensors_event_t event345;
@@ -707,8 +798,17 @@ void recordAltitude()
       {
         logger.setFlightTimeData( diffTime);
         logger.setFlightAltitudeData(currAltitude);
+        #ifdef BMP085_180
         logger.setFlightTemperatureData((long) bmp.readTemperature());
         logger.setFlightPressureData((long) bmp.readPressure());
+        #endif
+
+        #ifdef BMP280_sensor
+        double temperature, pressure;
+        bmp.getTemperatureAndPressure(temperature, pressure);
+        logger.setFlightTemperatureData((long) temperature);
+        logger.setFlightPressureData((long) pressure);
+        #endif
 
         sensors_event_t event345;
         accel345.getEvent(&event345);
@@ -728,7 +828,8 @@ void recordAltitude()
         }
       }
 
-      if ((canRecord  && (currAltitude < 10) && (millis() - initialTime) > 30000) || (canRecord  && (millis() - initialTime) > recordingTimeOut) )
+      //if ((canRecord  && (currAltitude < 10) && (millis() - initialTime) > 30000) || (canRecord  && (millis() - initialTime) > recordingTimeOut) )
+      if ((canRecord  && (currAltitude < 10) && (millis() - timeToApogee) > 2000) || (canRecord  && (millis() - initialTime) > recordingTimeOut) )
       {
         //end loging
         //store start and end address
@@ -799,7 +900,17 @@ void interpretCommandBuffer(char *commandbuffer) {
     Serial.print(F("$start;\n"));
     SerialCom.print(F("$start;\n"));
 
-    printAltiConfig();
+    //printAltiConfig();
+    unsigned char bluetoothName [21];
+    preferences.begin("namespace", false);
+
+    String btName = "";
+    btName = preferences.getString("Name", "TTGOAltimeter");
+    preferences.end();
+
+    btName.getBytes(bluetoothName, btName.length() + 1);
+
+    printAltiConfig((char *)bluetoothName);
     Serial.print(F("$end;\n"));
     SerialCom.print(F("$end;\n"));
   }
@@ -823,6 +934,13 @@ void interpretCommandBuffer(char *commandbuffer) {
     /*defaultConfig();
       writeConfigStruc();
       initAlti();*/
+    /*defaultConfig();
+      writeConfigStruc();*/
+    preferences.begin("namespace", false);
+    preferences.putString("Name", "TTGOAltimeter");
+    preferences.end();
+
+    //initAlti();
   }
   //this will erase all flight
   else if (commandbuffer[0] == 'e')
@@ -932,22 +1050,23 @@ void interpretCommandBuffer(char *commandbuffer) {
   //write  config
   else if (commandbuffer[0] == 'p')
   {
-    /*if (writeAltiConfigV2(commandbuffer)) {
+    if (writeAltiConfigV2(commandbuffer)) {
       Serial.print(F("$OK;\n"));
       SerialCom.print(F("$OK;\n"));
-      }
-      else {
+    }
+    else {
       Serial.print(F("$KO;\n"));
       SerialCom.print(F("$KO;\n"));
-      }*/
+    }
+
   }
   else if (commandbuffer[0] == 'q')
   {
     /*writeConfigStruc();
       readAltiConfig();
-      initAlti();
-      Serial.print(F("$OK;\n"));
-      SerialCom.print(F("$OK;\n"));*/
+      initAlti();*/
+    Serial.print(F("$OK;\n"));
+    SerialCom.print(F("$OK;\n"));
   }
   //this will read one flight
   else if (commandbuffer[0] == 'r')
@@ -989,6 +1108,19 @@ void interpretCommandBuffer(char *commandbuffer) {
       writeConfigStruc();
       initAlti();
       SerialCom.print(F("config reseted\n"));*/
+    /*defaultConfig();
+      writeConfigStruc();*/
+    preferences.begin("namespace", false);
+    preferences.putString("Name", "TTGOAltimeter");
+    preferences.end();
+
+    //initAlti();
+  }
+  else if (commandbuffer[0] == 'v')
+  {
+    preferences.begin("namespace", false);
+    SerialCom.println(preferences.getString("Name", "TTGOAltimeter"));
+    preferences.end();
   }
   // Recording
   else if (commandbuffer[0] == 'w')
@@ -1021,16 +1153,23 @@ void interpretCommandBuffer(char *commandbuffer) {
     if (commandbuffer[1] == '1') {
       SerialCom.print(F("Telemetry enabled\n"));
       telemetryEnable = true;
-      }
-      else {
+    }
+    else {
       SerialCom.print(F("Telemetry disabled\n"));
       telemetryEnable = false;
-      }
-      Serial.print(F("$OK;\n"));
-      SerialCom.print(F("$OK;\n"));
+    }
+    Serial.print(F("$OK;\n"));
+    SerialCom.print(F("$OK;\n"));
   }
 
+  //alti Name for ESP32
+  else if (commandbuffer[0] == 'z')
+  {
+    updateAltiName(commandbuffer);
 
+    Serial.print(F("$OK;\n"));
+    SerialCom.print(F("$OK;\n"));
+  }
   // empty command
   else if (commandbuffer[0] == ' ')
   {
@@ -1058,10 +1197,10 @@ unsigned int msgChk( char * buffer, long length ) {
    Print altimeter config to the Serial line
 
 */
-void printAltiConfig()
+void printAltiConfig(char *altiName)
 {
-  char altiConfig[120] = "";
-  char temp[10] = "";
+  char altiConfig[160] = "";
+  char temp[25] = "";
 
   strcat(altiConfig, "alticonfig,");
 
@@ -1144,6 +1283,8 @@ void printAltiConfig()
   //useTelemetryPort
   sprintf(temp, "%i,", 0);
   strcat(altiConfig, temp);
+  sprintf(temp, "%s,", altiName);
+  strcat(altiConfig, temp);
   unsigned int chk = 0;
   chk = msgChk( altiConfig, sizeof(altiConfig) );
   sprintf(temp, "%i;\n", chk);
@@ -1182,7 +1323,7 @@ void SendTelemetry(long sampleTime, int freq) {
     if (liftOff)
       li = 1;
 
-        
+
     int landed = 0;
     if ( liftOff && currAltitude < 10)
       landed = 1;
@@ -1214,9 +1355,16 @@ void SendTelemetry(long sampleTime, int freq) {
     strcat(altiTelem, ",");
 
     // temperature
+    #ifdef BMP085_180
     float temperature;
     temperature = bmp.readTemperature();
     sprintf(temp, "%i,", (int)temperature );
+    #endif
+    #ifdef BMP280_sensor
+    double temperature, pressure;
+    bmp.getTemperatureAndPressure(temperature, pressure);
+    sprintf(temp, "%i,", (int)temperature );
+    #endif
     strcat(altiTelem, temp);
 
     sprintf(temp, "%i,", (int)(100 * ((float)logger.getLastFlightEndAddress() / endAddress)) );
@@ -1236,7 +1384,7 @@ void SendTelemetry(long sampleTime, int freq) {
     strcat(altiTelem, temp);
     sprintf(temp, "%i,", (int)(1000 * ((float)event345.acceleration.z)) );
     strcat(altiTelem, temp);
-    
+
     unsigned int chk;
     chk = msgChk(altiTelem, sizeof(altiTelem));
     sprintf(temp, "%i", chk);
@@ -1249,4 +1397,172 @@ void SendTelemetry(long sampleTime, int freq) {
     SerialCom.print("$");
     SerialCom.print(altiTelem);
   }
+}
+
+#if defined ALTIMULTIESP32 || defined ALTIMULTIESP32_ACCELERO || defined ALTIMULTIESP32_ACCELERO_375 || defined ALTIMULTIESP32_ACCELERO_345
+void updateAltiName(char *commandbuffer) {
+  int i;
+  char temp[25];
+  char altiName[21];
+  strcpy(temp, commandbuffer);
+
+  for (i = 2; i < strlen(temp); i++)
+  {
+    if (temp[i] == ',') {
+      altiName[i - 2] = '\0';
+      break;
+    }
+    altiName[i - 2] = temp[i];
+  }
+
+  preferences.begin("namespace", false);
+  preferences.putString("Name", altiName);
+  preferences.end();
+}
+#endif
+
+/*
+  write the config received by the console
+
+*/
+
+bool writeAltiConfigV2( char *p ) {
+
+  /*char *str;
+    int i = 0;
+    int command = 0;
+    long commandVal = 0;
+    int strChk = 0;
+    char msg[100] = "";
+
+    while ((str = strtok_r(p, ",", &p)) != NULL) // delimiter is the comma
+    {
+    //SerialCom.println(str);
+    if (i == 1) {
+      command = atoi(str);
+      strcat(msg, str);
+    }
+    if (i == 2) {
+      commandVal =  atol(str);
+      strcat(msg, str);
+    }
+    if (i == 3) {
+      strChk  =  atoi(str);
+    }
+    i++;
+
+    }
+    //we have a partial config
+    if (i < 4)
+    return false;
+    //checksum is ivalid ?
+    if (msgChk(msg, sizeof(msg)) != strChk)
+    return false;
+
+    switch (command)
+    {
+    case 1:
+      config.unit = (int) commandVal;
+      break;
+    case 2:
+      config.beepingMode = (int) commandVal;
+      break;
+    case 3:
+      config.outPut1 = (int) commandVal;
+      break;
+    case 4:
+      config.outPut2 = (int) commandVal;
+      break;
+    case 5:
+      config.outPut3 = (int) commandVal;
+      break;
+    case 6:
+      config.mainAltitude = (int) commandVal;
+      break;
+    case 7:
+      config.superSonicYesNo = (int)commandVal;
+      break;
+    case 8:
+      config.outPut1Delay = (int)commandVal;
+      break;
+    case 9:
+      config.outPut2Delay = (int)commandVal;
+      break;
+    case 10:
+      config.outPut3Delay = (int)commandVal;
+      break;
+    case 11:
+      config.beepingFrequency = (int)commandVal;
+      break;
+    case 12:
+      config.nbrOfMeasuresForApogee = (int) commandVal;
+      break;
+    case 13:
+      config.endRecordAltitude = (int)commandVal;
+      break;
+    case 14:
+      config.telemetryType = (int)commandVal;
+      break;
+    case 15:
+      config.superSonicDelay = (int)commandVal;
+      break;
+    case 16:
+      config.connectionSpeed = commandVal;
+      break;
+    case 17:
+      config.altimeterResolution = (int)commandVal;
+      break;
+    case 18:
+      config.eepromSize = (int)commandVal;
+      break;
+    case 19:
+      config.noContinuity = (int)commandVal;
+      break;
+    case 20:
+      config.outPut4 = (int)commandVal;
+      break;
+    case 21:
+      config.outPut4Delay = (int)commandVal;
+      break;
+    case 22:
+      config.liftOffAltitude = (int)commandVal;
+      break;
+    case 23:
+      config.batteryType = (int)commandVal;
+      break;
+    case 24:
+      config.recordingTimeout = (int)commandVal;
+      break;
+    case 25:
+      config.altiID = (int)commandVal;
+      break;
+    case 26:
+      config.useTelemetryPort = (int)commandVal;
+      break;
+    }
+
+    // add checksum
+    config.cksum = CheckSumConf(config);
+  */
+  return true;
+}
+
+void updateAltiName(char *commandbuffer) {
+  int i;
+  char temp[25];
+  char altiName[21];
+  strcpy(temp, commandbuffer);
+
+  for (i = 2; i < strlen(temp); i++)
+  {
+    if (temp[i] == ',') {
+      altiName[i - 2] = '\0';
+      break;
+    }
+    altiName[i - 2] = temp[i];
+  }
+
+  preferences.begin("namespace", false);
+  preferences.putString("Name", altiName);
+  preferences.end();
 }
